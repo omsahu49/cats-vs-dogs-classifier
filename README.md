@@ -21,14 +21,17 @@ Kaggle competition — classify images as Cat or Dog.
 |-------------|------|-------|
 | Public (25%) | #2 | 1.00000 |
 | Private (75%) | #1 | - |
-```
 
-Phir **"Commit changes"** dabao ✅
-
----
-
-## Done! 🎉
-
-Tera link hoga:
-```
 github.com/[tera-username]/cats-vs-dogs-classifier
+
+## About me
+
+I'm Om Sahu, a BCA AI-DA student at LNCT.
+
+I build AI and ML models, and also take up freelance projects.
+
+Feel free to reach out if you're interested in working together.
+
+- LinkedIn: linkedin.com/in/omsahu-ai
+
+- Email: abc730244@gmail.com
