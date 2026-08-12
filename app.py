@@ -45,29 +45,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("## 🐱🐶 Cats vs Dogs AI Classifier")
-st.markdown("<p style='color: #9ca3af;'>ResNet50 Transfer Learning pet classification model.</p>", unsafe_allow_html=True)
+st.markdown("<p style='color: #9ca3af;'>Deep Learning ResNet50 Vision Model for pet classification.</p>", unsafe_allow_html=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 @st.cache_resource
 def load_pytorch_model():
-    # Checking for any .pth / .pt file in the repo root
+    # Check for local weights file if present
     files_in_dir = os.listdir(".")
     pth_files = [f for f in files_in_dir if f.endswith(".pth") or f.endswith(".pt")]
     
-    found_weight = None
-    if pth_files:
-        found_weight = os.path.abspath(pth_files[0])
-
     try:
-        # Using ResNet50 as specified in your training pipeline
-        model = models.resnet50(weights=None)
-        num_ftrs = model.fc.in_features
-        model.fc = torch.nn.Linear(num_ftrs, 2)
-        
-        if found_weight:
+        if pth_files:
+            found_weight = os.path.abspath(pth_files[0])
+            model = models.resnet50(weights=None)
+            num_ftrs = model.fc.in_features
+            model.fc = torch.nn.Linear(num_ftrs, 2)
+            
             state_dict = torch.load(found_weight, map_location=device)
-            # Support both raw state_dict and dicts with 'model' or 'state_dict' keys
             if "state_dict" in state_dict:
                 state_dict = state_dict["state_dict"]
             elif "model" in state_dict:
@@ -76,15 +71,20 @@ def load_pytorch_model():
             model.load_state_dict(state_dict, strict=False)
             model.to(device)
             model.eval()
-            return model, None, os.path.basename(found_weight)
+            return model, f"Custom Weights (`{pth_files[0]}`)"
         else:
-            return None, "No `.pth` or `.pt` weights file found in GitHub repo. Please upload your model weights file.", None
+            # Fallback: Load Pretrained ImageNet ResNet50 model automatically
+            weights = models.ResNet50_Weights.DEFAULT
+            model = models.resnet50(weights=weights)
+            model.to(device)
+            model.eval()
+            return model, "Pretrained ImageNet Engine (Auto-Loaded)"
     except Exception as e:
-        return None, str(e), None
+        return None, str(e)
 
-model, load_error, weight_filename = load_pytorch_model()
+model, load_status = load_pytorch_model()
 
-# ResNet Image Preprocessing
+# Transforms
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -112,33 +112,40 @@ with col2:
     
     if uploaded_file is not None and submit_btn:
         if model is None:
-            st.error(f"Failed to load PyTorch model: {load_error}")
+            st.error(f"Failed to load PyTorch model: {load_status}")
         else:
-            with st.spinner("Analyzing image through ResNet50..."):
+            with st.spinner("Analyzing image..."):
                 img_tensor = transform(image).unsqueeze(0).to(device)
                 
                 with torch.no_grad():
                     outputs = model(img_tensor)
                     probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
-                    cat_prob = probabilities[0].item() * 100
-                    dog_prob = probabilities[1].item() * 100
-                
+                    
+                    # If custom 2-class model
+                    if outputs.shape[1] == 2:
+                        cat_prob = probabilities[0].item() * 100
+                        dog_prob = probabilities[1].item() * 100
+                    else:
+                        # ImageNet mapping (Cat classes ~281-285, Dog classes ~151-268)
+                        dog_score = torch.sum(probabilities[151:269]).item()
+                        cat_score = torch.sum(probabilities[281:286]).item()
+                        total = dog_score + cat_score + 1e-7
+                        dog_prob = (dog_score / total) * 100
+                        cat_prob = (cat_score / total) * 100
+
                 st.markdown("---")
-                if dog_prob > cat_prob:
+                if dog_prob >= cat_prob:
                     st.success(f"### 🐶 Status: DOG DETECTED\n**Confidence:** {dog_prob:.2f}%")
                 else:
                     st.success(f"### 🐱 Status: CAT DETECTED\n**Confidence:** {cat_prob:.2f}%")
                 
                 st.markdown("<h5 style='color: #9ca3af; margin-top:20px;'>Probability Breakdown</h5>", unsafe_allow_html=True)
                 st.write(f"🐱 **Cat Probability:** {cat_prob:.2f}%")
-                st.progress(int(cat_prob))
+                st.progress(min(int(cat_prob), 100))
                 st.write(f"🐶 **Dog Probability:** {dog_prob:.2f}%")
-                st.progress(int(dog_prob))
+                st.progress(min(int(dog_prob), 100))
     else:
-        if weight_filename:
-            st.info(f"Loaded weights file: `{weight_filename}`. Upload an image on the left and click 'Submit'.")
-        else:
-            st.warning("⚠️ Weights file missing in repository! Upload your `.pth` file to GitHub.")
+        st.info(f"Engine Status: `{load_status}`. Upload an image on the left and click **Submit**.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.button("🔗 Share via Link", disabled=True, use_container_width=True)
