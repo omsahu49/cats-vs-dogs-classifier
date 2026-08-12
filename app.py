@@ -1,65 +1,80 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
+import torch
+import torchvision.transforms as transforms
+from torchvision import models
 import streamlit as st
-import numpy as np
-import tensorflow as tf
 from PIL import Image
 
+# Page setup
 st.set_page_config(
-    page_title="Cats vs Dogs AI Classifier",
+    page_title="Cats vs Dogs Classifier",
     page_icon="🐱🐶",
     layout="centered"
 )
 
 st.title("🐱🐶 Cats vs Dogs AI Classifier")
-st.write("Upload an image of a cat or a dog to classify it using AI.")
+st.write("Upload an image to classify whether it's a Cat or a Dog.")
 
-# Model File Path (Check exact model file name in your repo)
-MODEL_PATH = "model.h5"  # Agar .keras format h, to "model.keras" ya sahi name likhna
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# Model Loading Function
 @st.cache_resource
-def load_classifier_model():
-    # Searching for available model files in directory
-    possible_models = [MODEL_PATH, "model.keras", "cats_vs_dogs.h5", "best_model.h5"]
-    found_model = None
+def load_pytorch_model():
+    # List of possible PyTorch weight files
+    possible_weights = ["fold_1_model.pth", "model.pth", "best_model.pth", "model.pt"]
+    found_weight = None
     
-    for m_path in possible_models:
-        if os.path.exists(m_path):
-            found_model = m_path
+    for w_path in possible_weights:
+        if os.path.exists(w_path):
+            found_weight = w_path
             break
-            
-    if found_model:
-        try:
-            return tf.keras.models.load_model(found_model, compile=False), None
-        except Exception as e:
-            return None, str(e)
-    else:
-        return None, "No model file found in repository root. Please upload your model file (.h5 or .keras)."
 
-model, load_error = load_classifier_model()
+    # Initialize model (ResNet18 / EfficientNet based on your setup)
+    try:
+        model = models.resnet18(weights=None)
+        num_ftrs = model.fc.in_features
+        model.fc = torch.nn.Linear(num_ftrs, 2)
+        
+        if found_weight:
+            model.load_state_dict(torch.load(found_weight, map_location=device))
+            model.to(device)
+            model.eval()
+            return model, None
+        else:
+            return None, "Model weights file (e.g., `fold_1_model.pth`) not found in GitHub root directory."
+    except Exception as e:
+        return None, str(e)
 
-uploaded_file = st.file_uploader("Upload Image...", type=["jpg", "jpeg", "png", "webp"])
+model, load_error = load_pytorch_model()
+
+# Image Transformations
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png", "webp"])
 
 if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert('RGB')
+    image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Image", use_container_width=True)
     
     if st.button("Classify Image", type="primary"):
         if model is None:
-            st.error(f"Error: {load_error}")
+            st.error(f"Failed to load PyTorch model: {load_error}")
         else:
             with st.spinner("Classifying image..."):
-                img_resized = image.resize((150, 150)) # Model input size ke according adjust kar lo
-                img_array = np.array(img_resized, dtype=np.float32) / 255.0
-                img_batch = np.expand_dims(img_array, axis=0)
-
-                raw_pred = float(model.predict(img_batch, verbose=0)[0][0])
+                img_tensor = transform(image).unsqueeze(0).to(device)
+                
+                with torch.no_grad():
+                    outputs = model(img_tensor)
+                    probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
+                    cat_prob = probabilities[0].item() * 100
+                    dog_prob = probabilities[1].item() * 100
                 
                 st.divider()
-                if raw_pred > 0.5:
-                    confidence = raw_pred * 100
-                    st.success(f"### 🐶 Dog Detected (Confidence: {confidence:.2f}%)")
+                if dog_prob > cat_prob:
+                    st.success(f"### 🐶 Dog Detected (Confidence: {dog_prob:.2f}%)")
                 else:
-                    confidence = (1.0 - raw_pred) * 100
-                    st.success(f"### 🐱 Cat Detected (Confidence: {confidence:.2f}%)")
+                    st.success(f"### 🐱 Cat Detected (Confidence: {cat_prob:.2f}%)")
